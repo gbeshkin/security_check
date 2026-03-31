@@ -1,55 +1,137 @@
-rules:
-  - id: python-dangerous-eval
-    patterns:
-      - pattern: eval($X)
-    message: Avoid eval(); AI-generated code often introduces unsafe dynamic execution.
-    severity: ERROR
-    languages: [python]
-    metadata:
-      category: security
-      technology: [python]
-      owasp: ["A03"]
+name: scan-any-github-repo
 
-  - id: python-subprocess-shell-true
-    patterns:
-      - pattern: subprocess.run(..., shell=True, ...)
-    message: shell=True may enable command injection.
-    severity: ERROR
-    languages: [python]
-    metadata:
-      category: security
-      technology: [python]
-      owasp: ["A03"]
+on:
+  workflow_dispatch:
+    inputs:
+      repository_url:
+        description: "Full GitHub URL, for example https://github.com/owner/repo"
+        required: true
+        type: string
+      repository_ref:
+        description: "Optional branch, tag, or commit SHA"
+        required: false
+        default: ""
+        type: string
+      fail_on_high:
+        description: "Fail workflow on HIGH/CRITICAL findings"
+        required: true
+        default: true
+        type: boolean
 
-  - id: requests-verify-false
-    patterns:
-      - pattern: requests.$FUNC(..., verify=False, ...)
-    message: TLS certificate verification is disabled.
-    severity: WARNING
-    languages: [python]
-    metadata:
-      category: security
-      technology: [python]
-      owasp: ["A02"]
+permissions:
+  contents: read
 
-  - id: node-child-process-exec
-    patterns:
-      - pattern: child_process.exec($CMD)
-    message: child_process.exec may lead to command injection.
-    severity: ERROR
-    languages: [javascript, typescript]
-    metadata:
-      category: security
-      technology: [nodejs]
-      owasp: ["A03"]
+jobs:
+  scan:
+    runs-on: ubuntu-latest
 
-  - id: hardcoded-api-key
-    patterns:
-      - pattern-regex: (?i)(api[_-]?key|secret|token|password)\s*[:=]\s*["'][^"']{10,}["']
-    message: Possible hardcoded secret.
-    severity: ERROR
-    languages: [python, javascript, typescript, yaml]
-    metadata:
-      category: security
-      technology: [generic]
-      owasp: ["A02"]
+    steps:
+      - name: Checkout scanner repo
+        uses: actions/checkout@v4
+
+      - name: Validate input
+        run: |
+          URL="${{ inputs.repository_url }}"
+          if [[ ! "$URL" =~ ^https://github\.com/[^/]+/[^/]+/?$ ]]; then
+            echo "Only full GitHub repository URLs are supported."
+            exit 1
+          fi
+
+      - name: Set target variables
+        shell: bash
+        run: |
+          URL="${{ inputs.repository_url }}"
+          CLEAN_URL="${URL%.git}"
+          CLEAN_URL="${CLEAN_URL%/}"
+          REPO_PATH="${CLEAN_URL#https://github.com/}"
+          REPO_NAME="${REPO_PATH##*/}"
+
+          echo "TARGET_REPO_URL=$CLEAN_URL" >> "$GITHUB_ENV"
+          echo "TARGET_REPO_PATH=$REPO_PATH" >> "$GITHUB_ENV"
+          echo "TARGET_REPO_NAME=$REPO_NAME" >> "$GITHUB_ENV"
+
+      - name: Clone public or private repository
+        shell: bash
+        env:
+          TARGET_REPO_TOKEN: ${{ secrets.TARGET_REPO_TOKEN }}
+        run: |
+          mkdir -p external-target
+
+          if [ -n "$TARGET_REPO_TOKEN" ]; then
+            AUTH_URL="https://x-access-token:${TARGET_REPO_TOKEN}@github.com/${TARGET_REPO_PATH}.git"
+            if [ -n "${{ inputs.repository_ref }}" ]; then
+              git clone --depth 1 --branch "${{ inputs.repository_ref }}" "$AUTH_URL" external-target
+            else
+              git clone --depth 1 "$AUTH_URL" external-target
+            fi
+          else
+            if [ -n "${{ inputs.repository_ref }}" ]; then
+              git clone --depth 1 --branch "${{ inputs.repository_ref }}" "${TARGET_REPO_URL}.git" external-target
+            else
+              git clone --depth 1 "${TARGET_REPO_URL}.git" external-target
+            fi
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Semgrep
+        run: pip install semgrep
+
+      - name: Install Trivy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo gpg --dearmor -o /usr/share/keyrings/trivy.gpg
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install -y trivy
+
+      - name: Install OSV-Scanner
+        shell: bash
+        run: |
+          OSV_VERSION="v2.2.2"
+          wget -q "https://github.com/google/osv-scanner/releases/download/${OSV_VERSION}/osv-scanner_linux_amd64" -O osv-scanner
+          chmod +x osv-scanner
+          sudo mv osv-scanner /usr/local/bin/osv-scanner
+
+      - name: Run scanner
+        id: run_scan
+        shell: bash
+        run: |
+          set +e
+          python scanner.py external-target "${TARGET_REPO_NAME}"
+          SCAN_EXIT=$?
+          echo "scan_exit=$SCAN_EXIT" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-security-report-${{ env.TARGET_REPO_NAME }}
+          path: reports/
+
+      - name: Show report summary
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path("reports/security-report.json")
+          if path.exists():
+              data = json.loads(path.read_text(encoding="utf-8"))
+              print("Target:", data["target"])
+              print("Findings:", data["findings_count"])
+              print("Severity totals:", data["severity_totals"])
+              print("Score:", data["score"])
+          else:
+              print("No report generated")
+          PY
+
+      - name: Fail on HIGH/CRITICAL
+        if: ${{ inputs.fail_on_high && steps.run_scan.outputs.scan_exit != '0' }}
+        run: |
+          echo "Critical or high findings detected."
+          exit 1
