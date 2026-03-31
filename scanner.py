@@ -44,10 +44,11 @@ def normalize_severity(value):
 
 def run_semgrep(target):
     if not tool_exists("semgrep"):
-        return {"findings": []}
+        return {"findings": [], "debug": {"reason": "semgrep not installed"}}
 
     findings = []
     seen = set()
+    debug_runs = []
 
     commands = []
 
@@ -72,6 +73,12 @@ def run_semgrep(target):
 
     for cmd in commands:
         raw = run_cmd(cmd, timeout=600)
+        debug_runs.append({
+            "command": cmd,
+            "returncode": raw.get("returncode"),
+            "stderr": raw.get("stderr", "")[:2000],
+            "stdout_size": len(raw.get("stdout", "")),
+        })
 
         if raw.get("stdout"):
             try:
@@ -109,12 +116,12 @@ def run_semgrep(target):
                     "line": None,
                 })
 
-    return {"findings": findings}
+    return {"findings": findings, "debug": {"runs": debug_runs}}
 
 
 def run_trivy_fs(target):
     if not tool_exists("trivy"):
-        return {"findings": []}
+        return {"findings": [], "debug": {"reason": "trivy not installed"}}
 
     raw = run_cmd([
         "trivy",
@@ -130,6 +137,11 @@ def run_trivy_fs(target):
     ], timeout=600)
 
     findings = []
+    debug = {
+        "returncode": raw.get("returncode"),
+        "stderr": raw.get("stderr", "")[:2000],
+        "stdout_size": len(raw.get("stdout", "")),
+    }
 
     if raw.get("stdout"):
         try:
@@ -159,12 +171,12 @@ def run_trivy_fs(target):
                 "line": None,
             })
 
-    return {"findings": findings}
+    return {"findings": findings, "debug": debug}
 
 
 def run_osv(target):
     if not tool_exists("osv-scanner"):
-        return {"findings": []}
+        return {"findings": [], "debug": {"reason": "osv-scanner not installed"}}
 
     raw = run_cmd([
         "osv-scanner",
@@ -176,6 +188,11 @@ def run_osv(target):
     ], timeout=600)
 
     findings = []
+    debug = {
+        "returncode": raw.get("returncode"),
+        "stderr": raw.get("stderr", "")[:2000],
+        "stdout_size": len(raw.get("stdout", "")),
+    }
 
     if raw.get("stdout"):
         try:
@@ -207,7 +224,7 @@ def run_osv(target):
                 "line": None,
             })
 
-    return {"findings": findings}
+    return {"findings": findings, "debug": debug}
 
 
 def calculate_score(findings):
@@ -299,6 +316,10 @@ def build_html(report):
     if not rows:
         rows = ['<tr><td colspan="6">No findings</td></tr>']
 
+    semgrep_info = report["tools"]["semgrep"]
+    trivy_info = report["tools"]["trivy"]
+    osv_info = report["tools"]["osv-scanner"]
+
     return f"""<!doctype html>
 <html>
 <head>
@@ -350,6 +371,18 @@ th {{
     background: #111827;
     color: #fff;
 }}
+.meta {{
+    background: #fff;
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 18px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.08);
+}}
+code {{
+    background: #f3f4f6;
+    padding: 2px 6px;
+    border-radius: 6px;
+}}
 </style>
 </head>
 <body>
@@ -363,6 +396,14 @@ th {{
     <div class='card'><div class='small'>Critical</div><div class='big'>{report["severity_totals"]["CRITICAL"]}</div></div>
     <div class='card'><div class='small'>High</div><div class='big'>{report["severity_totals"]["HIGH"]}</div></div>
     <div class='card'><div class='small'>Medium</div><div class='big'>{report["severity_totals"]["MEDIUM"]}</div></div>
+</div>
+
+<div class="meta">
+    <h2>Tool diagnostics</h2>
+    <p><strong>Semgrep:</strong> available={semgrep_info["available"]}, findings={semgrep_info["findings_count"]}</p>
+    <p><strong>Trivy:</strong> available={trivy_info["available"]}, findings={trivy_info["findings_count"]}</p>
+    <p><strong>OSV-Scanner:</strong> available={osv_info["available"]}, findings={osv_info["findings_count"]}</p>
+    <pre>{escape(json.dumps(report["tools"], ensure_ascii=False, indent=2))}</pre>
 </div>
 
 <table>
@@ -390,10 +431,14 @@ def main():
     output_dir = Path(sys.argv[3]).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    semgrep_result = run_semgrep(target)
+    trivy_result = run_trivy_fs(target)
+    osv_result = run_osv(target)
+
     findings = []
-    findings.extend(run_semgrep(target).get("findings", []))
-    findings.extend(run_trivy_fs(target).get("findings", []))
-    findings.extend(run_osv(target).get("findings", []))
+    findings.extend(semgrep_result.get("findings", []))
+    findings.extend(trivy_result.get("findings", []))
+    findings.extend(osv_result.get("findings", []))
 
     severity_totals = {
         "CRITICAL": 0,
@@ -417,17 +462,18 @@ def main():
         "tools": {
             "semgrep": {
                 "available": tool_exists("semgrep"),
-                "configs": [
-                    str(DEFAULT_RULES) if DEFAULT_RULES.exists() else None,
-                    "p/security-audit",
-                ],
+                "findings_count": len(semgrep_result.get("findings", [])),
+                "debug": semgrep_result.get("debug", {}),
             },
             "trivy": {
                 "available": tool_exists("trivy"),
-                "mode": "vuln",
+                "findings_count": len(trivy_result.get("findings", [])),
+                "debug": trivy_result.get("debug", {}),
             },
             "osv-scanner": {
                 "available": tool_exists("osv-scanner"),
+                "findings_count": len(osv_result.get("findings", [])),
+                "debug": osv_result.get("debug", {}),
             },
         },
     }
