@@ -10,4 +10,4 @@ RUN OSV_VERSION="v2.2.2" && wget -q "https://github.com/google/osv-scanner/relea
 COPY . .
 ENV PORT=5000
 EXPOSE 5000
-CMD sh -c "gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 600 wsgi:app"
+CMD ["/bin/sh", "-c", "python job_worker.py & gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120 wsgi:app"]

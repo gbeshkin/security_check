@@ -1,39 +1,31 @@
-# AI Security Scanner Live
+# AI Security Scanner v4
 
-English UI + live deployment-ready build.
+This version moves clone and scan work into a background worker.
 
-## Features
+## What changed
+- the web request creates a job and returns immediately
+- a background worker reads queued jobs from `jobs/`
+- users see a "Scanning..." page with polling
+- the report opens automatically when ready
 
-- scan public GitHub repositories by URL
-- report history
-- downloadable JSON / HTML / SARIF
-- deployment-ready with Dockerfile, Procfile, wsgi.py, and render.yaml
-
-## Local run
-
+## Quick start
 ```bash
 pip install -r requirements.txt
 pip install semgrep
+python job_worker.py
+```
+
+In another terminal:
+```bash
 python web/app.py
 ```
 
-Open `http://localhost:5000`
+## Docker / Railway
+The Dockerfile starts:
+- the background worker
+- gunicorn web app
 
-## Live deployment
-
-### Docker
-```bash
-docker build -t ai-sec-audit-live .
-docker run -p 5000:5000 ai-sec-audit-live
-```
-
-### VPS
-```bash
-pip install -r requirements.txt
-pip install semgrep
-gunicorn --bind 0.0.0.0:5000 wsgi:app
-```
-
-### Notes
-- Public GitHub repositories only
-- Add rate limiting and cleanup policy before large-scale public use
+## Current scope
+- public GitHub repositories only
+- file-based queue
+- single-process worker
