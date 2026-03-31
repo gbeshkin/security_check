@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -42,6 +43,31 @@ def normalize_severity(value):
     }.get(value, value)
 
 
+def should_skip_file(path: Path) -> bool:
+    skip_parts = {
+        ".git",
+        "node_modules",
+        "venv",
+        ".venv",
+        "dist",
+        "build",
+        "__pycache__",
+        ".next",
+        ".nuxt",
+        ".idea",
+        ".pytest_cache",
+        ".mypy_cache",
+    }
+    return any(part in skip_parts for part in path.parts)
+
+
+def safe_read_text(path: Path):
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return None
+
+
 def run_semgrep(target):
     if not tool_exists("semgrep"):
         return {"findings": [], "debug": {"reason": "semgrep not installed"}}
@@ -67,6 +93,24 @@ def run_semgrep(target):
         "scan",
         "--config",
         "p/security-audit",
+        "--json",
+        str(target),
+    ])
+
+    commands.append([
+        "semgrep",
+        "scan",
+        "--config",
+        "p/owasp-top-ten",
+        "--json",
+        str(target),
+    ])
+
+    commands.append([
+        "semgrep",
+        "scan",
+        "--config",
+        "p/secrets",
         "--json",
         str(target),
     ])
@@ -129,7 +173,7 @@ def run_trivy_fs(target):
         "--scanners",
         "vuln",
         "--skip-dirs",
-        ".git,node_modules,venv,.venv,dist,build,__pycache__",
+        ".git,node_modules,venv,.venv,dist,build,__pycache__,.next,.nuxt",
         "--quiet",
         "--format",
         "json",
@@ -227,6 +271,189 @@ def run_osv(target):
     return {"findings": findings, "debug": debug}
 
 
+def run_ai_checks(target):
+    findings = []
+    debug = {"files_checked": 0}
+
+    for file in Path(target).rglob("*"):
+        if not file.is_file() or should_skip_file(file):
+            continue
+
+        content = safe_read_text(file)
+        if content is None:
+            continue
+
+        debug["files_checked"] += 1
+        content_lower = content.lower()
+
+        if "openai" in content_lower and "api_key" in content_lower:
+            findings.append({
+                "tool": "ai-check",
+                "rule_id": "ai.exposed.api_key",
+                "severity": "HIGH",
+                "category": "ai-security",
+                "title": "Possible OpenAI API key exposure",
+                "message": "API key usage detected in code near OpenAI integration.",
+                "file": str(file),
+                "line": None,
+            })
+
+        if "anthropic" in content_lower and "api_key" in content_lower:
+            findings.append({
+                "tool": "ai-check",
+                "rule_id": "ai.anthropic.api_key",
+                "severity": "HIGH",
+                "category": "ai-security",
+                "title": "Possible Anthropic API key exposure",
+                "message": "API key usage detected in code near Anthropic integration.",
+                "file": str(file),
+                "line": None,
+            })
+
+        if "eval(" in content:
+            findings.append({
+                "tool": "ai-check",
+                "rule_id": "ai.eval.usage",
+                "severity": "HIGH",
+                "category": "ai-security",
+                "title": "Dangerous eval() usage",
+                "message": "eval() detected. This is a common insecure AI-generated pattern.",
+                "file": str(file),
+                "line": None,
+            })
+
+        if "exec(" in content:
+            findings.append({
+                "tool": "ai-check",
+                "rule_id": "ai.exec.usage",
+                "severity": "HIGH",
+                "category": "ai-security",
+                "title": "Dangerous exec() usage",
+                "message": "exec() detected. This may allow arbitrary code execution.",
+                "file": str(file),
+                "line": None,
+            })
+
+        if "shell=true" in content_lower:
+            findings.append({
+                "tool": "ai-check",
+                "rule_id": "ai.shell.true",
+                "severity": "HIGH",
+                "category": "ai-security",
+                "title": "shell=True usage detected",
+                "message": "shell=True is often unsafe and may enable command injection.",
+                "file": str(file),
+                "line": None,
+            })
+
+        if "verify=false" in content_lower:
+            findings.append({
+                "tool": "ai-check",
+                "rule_id": "ai.tls.verify.false",
+                "severity": "MEDIUM",
+                "category": "ai-security",
+                "title": "TLS verification disabled",
+                "message": "verify=False detected. TLS certificate validation is disabled.",
+                "file": str(file),
+                "line": None,
+            })
+
+    return {"findings": findings, "debug": debug}
+
+
+def run_secret_scan(target):
+    findings = []
+    debug = {"files_checked": 0}
+
+    patterns = [
+        ("AWS Access Key", r"AKIA[0-9A-Z]{16}"),
+        ("GitHub Token", r"github_pat_[A-Za-z0-9_]{20,}"),
+        ("OpenAI-style Key", r"sk-[A-Za-z0-9]{20,}"),
+        ("Generic API Key", r"(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*[\"'][^\"'\n]{10,}[\"']"),
+    ]
+
+    for file in Path(target).rglob("*"):
+        if not file.is_file() or should_skip_file(file):
+            continue
+
+        content = safe_read_text(file)
+        if content is None:
+            continue
+
+        debug["files_checked"] += 1
+
+        for name, pattern in patterns:
+            if re.search(pattern, content):
+                findings.append({
+                    "tool": "secret-scan",
+                    "rule_id": "secret.detected",
+                    "severity": "HIGH",
+                    "category": "secrets",
+                    "title": f"{name} detected",
+                    "message": "Possible secret found in repository files.",
+                    "file": str(file),
+                    "line": None,
+                })
+
+    return {"findings": findings, "debug": debug}
+
+
+def run_docker_checks(target):
+    findings = []
+    debug = {"dockerfiles_checked": 0}
+
+    dockerfiles = list(Path(target).rglob("Dockerfile"))
+
+    for dockerfile in dockerfiles:
+        if should_skip_file(dockerfile):
+            continue
+
+        content = safe_read_text(dockerfile)
+        if content is None:
+            continue
+
+        debug["dockerfiles_checked"] += 1
+        content_lower = content.lower()
+
+        if ":latest" in content_lower:
+            findings.append({
+                "tool": "docker-check",
+                "rule_id": "docker.latest.tag",
+                "severity": "MEDIUM",
+                "category": "misconfig",
+                "title": "Using latest tag",
+                "message": "Avoid using latest tag in Dockerfile base images.",
+                "file": str(dockerfile),
+                "line": None,
+            })
+
+        if "user root" in content_lower or "\nuser root" in content_lower:
+            findings.append({
+                "tool": "docker-check",
+                "rule_id": "docker.root.user",
+                "severity": "MEDIUM",
+                "category": "misconfig",
+                "title": "Container runs as root",
+                "message": "Running containers as root increases risk.",
+                "file": str(dockerfile),
+                "line": None,
+            })
+
+        if "add http://" in content_lower or "curl http://" in content_lower or "wget http://" in content_lower:
+            findings.append({
+                "tool": "docker-check",
+                "rule_id": "docker.insecure.download",
+                "severity": "MEDIUM",
+                "category": "misconfig",
+                "title": "Insecure HTTP download in Dockerfile",
+                "message": "HTTP downloads in build steps may be insecure.",
+                "file": str(dockerfile),
+                "line": None,
+            })
+
+    return {"findings": findings, "debug": debug}
+
+
 def calculate_score(findings):
     weights = {
         "CRITICAL": 40,
@@ -316,10 +543,6 @@ def build_html(report):
     if not rows:
         rows = ['<tr><td colspan="6">No findings</td></tr>']
 
-    semgrep_info = report["tools"]["semgrep"]
-    trivy_info = report["tools"]["trivy"]
-    osv_info = report["tools"]["osv-scanner"]
-
     return f"""<!doctype html>
 <html>
 <head>
@@ -378,11 +601,6 @@ th {{
     margin-bottom: 18px;
     box-shadow: 0 2px 12px rgba(0,0,0,.08);
 }}
-code {{
-    background: #f3f4f6;
-    padding: 2px 6px;
-    border-radius: 6px;
-}}
 </style>
 </head>
 <body>
@@ -400,9 +618,6 @@ code {{
 
 <div class="meta">
     <h2>Tool diagnostics</h2>
-    <p><strong>Semgrep:</strong> available={semgrep_info["available"]}, findings={semgrep_info["findings_count"]}</p>
-    <p><strong>Trivy:</strong> available={trivy_info["available"]}, findings={trivy_info["findings_count"]}</p>
-    <p><strong>OSV-Scanner:</strong> available={osv_info["available"]}, findings={osv_info["findings_count"]}</p>
     <pre>{escape(json.dumps(report["tools"], ensure_ascii=False, indent=2))}</pre>
 </div>
 
@@ -434,11 +649,17 @@ def main():
     semgrep_result = run_semgrep(target)
     trivy_result = run_trivy_fs(target)
     osv_result = run_osv(target)
+    ai_result = run_ai_checks(target)
+    secret_result = run_secret_scan(target)
+    docker_result = run_docker_checks(target)
 
     findings = []
     findings.extend(semgrep_result.get("findings", []))
     findings.extend(trivy_result.get("findings", []))
     findings.extend(osv_result.get("findings", []))
+    findings.extend(ai_result.get("findings", []))
+    findings.extend(secret_result.get("findings", []))
+    findings.extend(docker_result.get("findings", []))
 
     severity_totals = {
         "CRITICAL": 0,
@@ -474,6 +695,21 @@ def main():
                 "available": tool_exists("osv-scanner"),
                 "findings_count": len(osv_result.get("findings", [])),
                 "debug": osv_result.get("debug", {}),
+            },
+            "ai-check": {
+                "available": True,
+                "findings_count": len(ai_result.get("findings", [])),
+                "debug": ai_result.get("debug", {}),
+            },
+            "secret-scan": {
+                "available": True,
+                "findings_count": len(secret_result.get("findings", [])),
+                "debug": secret_result.get("debug", {}),
+            },
+            "docker-check": {
+                "available": True,
+                "findings_count": len(docker_result.get("findings", [])),
+                "debug": docker_result.get("debug", {}),
             },
         },
     }
