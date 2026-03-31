@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: ai-sec-audit-live
+    env: docker
+    plan: starter
+    autoDeploy: true

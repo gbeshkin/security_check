@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <title>Security Report</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <style>
     body { font-family: Arial, sans-serif; margin: 24px; background: #f7f7fb; color: #111827; }
     .wrap { max-width: 1200px; margin: 0 auto; }
@@ -16,27 +17,23 @@
     .actions { margin: 16px 0 22px; }
     .btn { display:inline-block; margin-right:10px; background:#111827; color:#fff; text-decoration:none; padding:10px 14px; border-radius:10px; }
     .meta { margin-bottom: 18px; background:#fff; padding:14px 16px; border-radius:16px; box-shadow:0 2px 12px rgba(0,0,0,.06); }
-    .pill { display:inline-block; padding:4px 10px; border-radius:999px; background:#eef2ff; color:#3730a3; font-size:12px; margin-left:8px; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Security Report <span class="pill">{{ data.target }}</span></h1>
-
+    <h1>Security Report</h1>
     <div class="meta">
-      <p><strong>Источник:</strong> {{ meta.source_type }}</p>
-      <p><strong>Значение:</strong> {{ meta.source_value }}</p>
+      <p><strong>Source:</strong> {{ meta.source_type }}</p>
+      <p><strong>Value:</strong> {{ meta.source_value }}</p>
       <p><strong>Scanned path:</strong> {{ data.scanned_path }}</p>
       <p><strong>Scanner exit code:</strong> {{ meta.scanner_returncode }}</p>
     </div>
-
     <div class="actions">
-      <a class="btn" href="/download/{{ scan_id }}/json">Скачать JSON</a>
-      <a class="btn" href="/download/{{ scan_id }}/html">Скачать HTML</a>
-      <a class="btn" href="/download/{{ scan_id }}/sarif">Скачать SARIF</a>
-      <a class="btn" href="/">На главную</a>
+      <a class="btn" href="/download/{{ scan_id }}/json">Download JSON</a>
+      <a class="btn" href="/download/{{ scan_id }}/html">Download HTML</a>
+      <a class="btn" href="/download/{{ scan_id }}/sarif">Download SARIF</a>
+      <a class="btn" href="/">Back to home</a>
     </div>
-
     <div class="grid">
       <div class="card"><div class="small">Score</div><div class="big">{{ data.score }}</div></div>
       <div class="card"><div class="small">Total</div><div class="big">{{ data.findings_count }}</div></div>
@@ -44,29 +41,12 @@
       <div class="card"><div class="small">High</div><div class="big">{{ data.severity_totals.HIGH }}</div></div>
       <div class="card"><div class="small">Medium</div><div class="big">{{ data.severity_totals.MEDIUM }}</div></div>
     </div>
-
     <table>
-      <tr>
-        <th>Severity</th>
-        <th>Category</th>
-        <th>File</th>
-        <th>Line</th>
-        <th>Title</th>
-        <th>Tool</th>
-      </tr>
+      <tr><th>Severity</th><th>Category</th><th>File</th><th>Line</th><th>Title</th><th>Tool</th></tr>
       {% for f in data.findings %}
-      <tr>
-        <td>{{ f.severity }}</td>
-        <td>{{ f.category }}</td>
-        <td>{{ f.file }}</td>
-        <td>{{ f.line }}</td>
-        <td>{{ f.title }}</td>
-        <td>{{ f.tool }}</td>
-      </tr>
+      <tr><td>{{ f.severity }}</td><td>{{ f.category }}</td><td>{{ f.file }}</td><td>{{ f.line }}</td><td>{{ f.title }}</td><td>{{ f.tool }}</td></tr>
       {% else %}
-      <tr>
-        <td colspan="6">Проблем не найдено</td>
-      </tr>
+      <tr><td colspan="6">No findings</td></tr>
       {% endfor %}
     </table>
   </div>
