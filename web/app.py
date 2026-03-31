@@ -124,4 +124,4 @@ def health():
 
 if __name__ == "__main__":
     import os
-        CMD sh -c "gunicorn --bind 0.0.0.0:$PORT wsgi:app"
+        CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:$PORT wsgi:app"]
