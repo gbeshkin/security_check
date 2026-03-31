@@ -10,4 +10,4 @@ RUN OSV_VERSION="v2.2.2" && wget -q "https://github.com/google/osv-scanner/relea
 COPY . .
 ENV PORT=5000
 EXPOSE 5000
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "wsgi:app"]
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT} wsgi:app"]
