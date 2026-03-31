@@ -1,0 +1,55 @@
+rules:
+  - id: python-dangerous-eval
+    patterns:
+      - pattern: eval($X)
+    message: Avoid eval(); AI-generated code often introduces unsafe dynamic execution.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      technology: [python]
+      owasp: ["A03"]
+
+  - id: python-subprocess-shell-true
+    patterns:
+      - pattern: subprocess.run(..., shell=True, ...)
+    message: shell=True may enable command injection.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      category: security
+      technology: [python]
+      owasp: ["A03"]
+
+  - id: requests-verify-false
+    patterns:
+      - pattern: requests.$FUNC(..., verify=False, ...)
+    message: TLS certificate verification is disabled.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      category: security
+      technology: [python]
+      owasp: ["A02"]
+
+  - id: node-child-process-exec
+    patterns:
+      - pattern: child_process.exec($CMD)
+    message: child_process.exec may lead to command injection.
+    severity: ERROR
+    languages: [javascript, typescript]
+    metadata:
+      category: security
+      technology: [nodejs]
+      owasp: ["A03"]
+
+  - id: hardcoded-api-key
+    patterns:
+      - pattern-regex: (?i)(api[_-]?key|secret|token|password)\s*[:=]\s*["'][^"']{10,}["']
+    message: Possible hardcoded secret.
+    severity: ERROR
+    languages: [python, javascript, typescript, yaml]
+    metadata:
+      category: security
+      technology: [generic]
+      owasp: ["A02"]
