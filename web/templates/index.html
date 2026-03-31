@@ -1,7 +1,83 @@
-<html><body>
-<h1>AI Security Scanner</h1>
-<form method="post">
-<input name="path" placeholder="Path"/>
-<button>Scan</button>
-</form>
-</body></html>
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>AI Security Scanner v3</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 32px; background: #f5f7fb; color: #111827; }
+    .wrap { max-width: 1100px; margin: 0 auto; }
+    .hero { margin-bottom: 24px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .card { background: white; border-radius: 18px; padding: 22px; box-shadow: 0 8px 28px rgba(0,0,0,.08); }
+    input { width: 100%; padding: 12px; margin-top: 8px; margin-bottom: 16px; border: 1px solid #d1d5db; border-radius: 12px; box-sizing: border-box; }
+    button { background: #111827; color: white; border: 0; padding: 12px 18px; border-radius: 12px; cursor: pointer; }
+    .hint { color: #6b7280; font-size: 14px; }
+    .table-wrap { margin-top: 26px; }
+    table { width: 100%; border-collapse: collapse; background: white; border-radius: 18px; overflow: hidden; box-shadow: 0 8px 28px rgba(0,0,0,.05); }
+    th, td { padding: 12px; border-bottom: 1px solid #ececf3; text-align: left; }
+    th { background: #111827; color: white; }
+    a { color: #0f62fe; text-decoration: none; }
+    .badge { display:inline-block; padding:4px 10px; border-radius:999px; background:#eef2ff; color:#3730a3; font-size:12px; margin-left:8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <h1>AI Security Scanner v3 <span class="badge">GitHub URL + Local Path</span></h1>
+      <p>Сервис для проверки проектов на типовые проблемы безопасности. Публичные GitHub-репозитории можно проверять прямо по ссылке.</p>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Проверить GitHub-репозиторий</h2>
+        <form method="post" action="/scan/github">
+          <label>GitHub URL</label>
+          <input type="text" name="repo_url" placeholder="https://github.com/owner/repo" />
+          <button type="submit">Сканировать GitHub repo</button>
+        </form>
+        <p class="hint">Сейчас через UI поддерживаются публичные репозитории. Для private repo нужна отдельная авторизация или токен.</p>
+      </div>
+
+      <div class="card">
+        <h2>Проверить локальный проект</h2>
+        <form method="post" action="/scan/local">
+          <label>Локальный путь</label>
+          <input type="text" name="local_path" placeholder="/Users/name/project или ./repo" />
+          <label>Название в отчёте</label>
+          <input type="text" name="display_name" placeholder="my-project" />
+          <button type="submit">Сканировать локальный проект</button>
+        </form>
+        <p class="hint">Этот режим полезен для локальной проверки перед коммитом или публикацией репозитория.</p>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <h2>Последние отчёты</h2>
+      <table>
+        <tr>
+          <th>Время</th>
+          <th>Источник</th>
+          <th>Цель</th>
+          <th>Findings</th>
+          <th>Score</th>
+          <th>Открыть</th>
+        </tr>
+        {% for item in reports %}
+        <tr>
+          <td>{{ item.created_at }}</td>
+          <td>{{ item.source_type }}</td>
+          <td>{{ item.source_value }}</td>
+          <td>{{ item.findings_count }}</td>
+          <td>{{ item.score }}</td>
+          <td><a href="/report/{{ item.scan_id }}">Открыть отчёт</a></td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="6">Пока нет отчётов</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+  </div>
+</body>
+</html>

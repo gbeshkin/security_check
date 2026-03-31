@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Ошибка сканирования</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 32px; background: #f5f7fb; color: #111827; }
+    .card { max-width: 900px; background: white; border-radius: 18px; padding: 24px; box-shadow: 0 8px 28px rgba(0,0,0,.08); }
+    pre { white-space: pre-wrap; background: #111827; color: #fff; padding: 16px; border-radius: 12px; overflow: auto; }
+    a { color: #0f62fe; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Не удалось клонировать репозиторий</h1>
+    <p><strong>URL:</strong> {{ repo_url }}</p>
+    <p>Проверь, что ссылка публичная и имеет формат <code>https://github.com/owner/repo</code>.</p>
+    <pre>{{ error }}</pre>
+    <p><a href="/">Вернуться назад</a></p>
+  </div>
+</body>
+</html>
