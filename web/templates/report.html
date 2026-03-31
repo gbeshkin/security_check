@@ -1,0 +1,14 @@
+<html><body>
+<h1>Report</h1>
+<p>Score: {{data.score}}</p>
+<table border="1">
+<tr><th>Severity</th><th>File</th><th>Message</th></tr>
+{% for f in data.findings %}
+<tr>
+<td>{{f.severity}}</td>
+<td>{{f.file}}</td>
+<td>{{f.message}}</td>
+</tr>
+{% endfor %}
+</table>
+</body></html>
