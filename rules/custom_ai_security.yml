@@ -1,0 +1,72 @@
+rules:
+  - id: python-dangerous-eval
+    message: Avoid eval(); AI-generated code often introduces unsafe dynamic execution.
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern: eval($X)
+    metadata:
+      category: security
+      owasp: ["A03:2021-Injection"]
+      ai_generated_pattern: true
+      fix: Replace eval() with explicit parsing or a safe dispatcher.
+
+  - id: python-subprocess-shell-true
+    message: shell=True may enable command injection.
+    severity: ERROR
+    languages: [python]
+    patterns:
+      - pattern: subprocess.run(..., shell=True, ...)
+    metadata:
+      category: security
+      owasp: ["A03:2021-Injection"]
+      ai_generated_pattern: true
+      fix: Pass command arguments as a list and validate untrusted input.
+
+  - id: python-requests-verify-false
+    message: TLS certificate verification is disabled.
+    severity: WARNING
+    languages: [python]
+    patterns:
+      - pattern: requests.$FUNC(..., verify=False, ...)
+    metadata:
+      category: security
+      owasp: ["A02:2021-Cryptographic Failures"]
+      ai_generated_pattern: true
+      fix: Remove verify=False and trust the system CA bundle or a pinned cert.
+
+  - id: js-node-child-process-exec
+    message: child_process.exec may become command injection when fed by untrusted input.
+    severity: ERROR
+    languages: [javascript, typescript]
+    patterns:
+      - pattern: exec($CMD)
+    metadata:
+      category: security
+      owasp: ["A03:2021-Injection"]
+      ai_generated_pattern: true
+      fix: Prefer execFile/spawn with argument arrays and strict input validation.
+
+  - id: js-dangerous-eval
+    message: Avoid eval() in JavaScript/TypeScript.
+    severity: ERROR
+    languages: [javascript, typescript]
+    patterns:
+      - pattern: eval($X)
+    metadata:
+      category: security
+      owasp: ["A03:2021-Injection"]
+      ai_generated_pattern: true
+      fix: Use safe parsing or a constrained interpreter instead of eval().
+
+  - id: generic-hardcoded-secret
+    message: Possible hardcoded secret.
+    severity: ERROR
+    languages: [python, javascript, typescript, go, java, yaml, json]
+    patterns:
+      - pattern-regex: (?i)(api[_-]?key|secret|token|password)\s*[:=]\s*["'][^"']{8,}["']
+    metadata:
+      category: security
+      owasp: ["A02:2021-Cryptographic Failures", "A05:2021-Security Misconfiguration"]
+      ai_generated_pattern: true
+      fix: Move secrets to a secure secret manager or environment variables.
