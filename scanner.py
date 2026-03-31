@@ -25,7 +25,7 @@ def run_semgrep(target):
     if not tool_exists("semgrep"):
         return {"findings": []}
     findings = []
-    commands = [["semgrep", "scan", "--config", "auto", "--json", str(target)]]
+    commands = [["semgrep", "scan", "--config", str(DEFAULT_RULES), "--json", str(target)]]
     if DEFAULT_RULES.exists():
         commands.append(["semgrep", "scan", "--config", str(DEFAULT_RULES), "--json", str(target)])
     for cmd in commands:
@@ -52,7 +52,13 @@ def run_semgrep(target):
 def run_trivy_fs(target):
     if not tool_exists("trivy"):
         return {"findings": []}
-    raw = run_cmd(["trivy", "fs", "--format", "json", str(target)])
+    raw = run_cmd([
+        "trivy", "fs",
+        "--scanners", "vuln,secret",
+        "--format", "json",
+        "--quiet",
+        str(target)
+])
     findings = []
     if raw.get("stdout"):
         try:
