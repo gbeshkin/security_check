@@ -9,10 +9,23 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_RULES = ROOT / "rules" / "custom_ai_security.yml"
-TEXT_FILE_EXTENSIONS = {".py",".js",".jsx",".ts",".tsx",".json",".yaml",".yml",".env",".ini",".cfg",".conf",".toml",".md",".txt",".sh",".bash",".zsh",".dockerfile",".xml",".html",".htm",".css",".scss",".sql",".properties"}
-SKIP_DIRS = {".git","node_modules","venv",".venv","dist","build","__pycache__", ".next",".nuxt",".idea",".pytest_cache",".mypy_cache",".turbo",".cache",".parcel-cache","coverage",".yarn",".pnpm-store"}
-MAX_TEXT_FILE_SIZE = 500000
+
+TEXT_FILE_EXTENSIONS = {
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".json", ".yaml", ".yml", ".env",
+    ".ini", ".cfg", ".conf", ".toml", ".md", ".txt", ".sh", ".bash",
+    ".zsh", ".dockerfile", ".xml", ".html", ".htm", ".css", ".scss",
+    ".sql", ".properties",
+}
+
+SKIP_DIRS = {
+    ".git", "node_modules", "venv", ".venv", "dist", "build", "__pycache__",
+    ".next", ".nuxt", ".idea", ".pytest_cache", ".mypy_cache", ".turbo",
+    ".cache", ".parcel-cache", "coverage", ".yarn", ".pnpm-store",
+}
+
+MAX_TEXT_FILE_SIZE = 500_000
 MAX_FILES_TO_SCAN = 5000
+
 
 def run_cmd(cmd, cwd=None, timeout=900, env=None):
     full_env = None
@@ -20,89 +33,289 @@ def run_cmd(cmd, cwd=None, timeout=900, env=None):
         import os
         full_env = os.environ.copy()
         full_env.update(env)
-    result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False, timeout=timeout, env=full_env)
-    return {"command": cmd, "returncode": result.returncode, "stdout": result.stdout, "stderr": result.stderr}
 
-def tool_exists(name): return shutil.which(name) is not None
+    result = subprocess.run(
+        cmd,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=timeout,
+        env=full_env,
+    )
+    return {
+        "command": cmd,
+        "returncode": result.returncode,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+    }
+
+
+def tool_exists(name):
+    return shutil.which(name) is not None
+
+
 def normalize_severity(value):
-    if not value: return "UNKNOWN"
+    if not value:
+        return "UNKNOWN"
     value = str(value).upper()
-    return {"ERROR":"HIGH","WARNING":"MEDIUM","INFO":"LOW","NOTE":"LOW","CRITICAL":"CRITICAL","HIGH":"HIGH","MEDIUM":"MEDIUM","LOW":"LOW","UNKNOWN":"UNKNOWN"}.get(value, value)
-def should_skip_file(path: Path): return any(part in SKIP_DIRS for part in path.parts)
+    return {
+        "ERROR": "HIGH",
+        "WARNING": "MEDIUM",
+        "INFO": "LOW",
+        "NOTE": "LOW",
+        "CRITICAL": "CRITICAL",
+        "HIGH": "HIGH",
+        "MEDIUM": "MEDIUM",
+        "LOW": "LOW",
+        "UNKNOWN": "UNKNOWN",
+    }.get(value, value)
+
+
+def should_skip_file(path: Path) -> bool:
+    return any(part in SKIP_DIRS for part in path.parts)
+
+
 def safe_read_text(path: Path):
-    try: return path.read_text(encoding="utf-8", errors="ignore")
-    except Exception: return None
-def is_text_candidate(path: Path):
-    if should_skip_file(path) or not path.is_file(): return False
-    if path.name in {"Dockerfile",".env",".env.local",".env.production",".env.development"}: return True
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return None
+
+
+def is_text_candidate(path: Path) -> bool:
+    if should_skip_file(path):
+        return False
+    if not path.is_file():
+        return False
+    if path.name in {"Dockerfile", ".env", ".env.local", ".env.production", ".env.development"}:
+        return True
     return path.suffix.lower() in TEXT_FILE_EXTENSIONS
-def add_finding(findings, seen, *, tool, rule_id, severity, category, title, message, file, line=None):
+
+
+def add_finding(
+    findings,
+    seen,
+    *,
+    tool,
+    rule_id,
+    severity,
+    category,
+    title,
+    message,
+    file,
+    line=None,
+):
     key = (tool, rule_id, str(file), line)
-    if key in seen: return
+    if key in seen:
+        return
     seen.add(key)
-    findings.append({"tool":tool,"rule_id":rule_id,"severity":severity,"category":category,"title":title,"message":message,"file":str(file) if file is not None else None,"line":line})
+    findings.append({
+        "tool": tool,
+        "rule_id": rule_id,
+        "severity": severity,
+        "category": category,
+        "title": title,
+        "message": message,
+        "file": str(file) if file is not None else None,
+        "line": line,
+    })
+
+
 def find_line_number(content: str, needle: str):
     try:
         for idx, line in enumerate(content.splitlines(), start=1):
-            if needle in line: return idx
-    except Exception: return None
+            if needle in line:
+                return idx
+    except Exception:
+        return None
     return None
+
+
 def regex_findings(content, patterns):
     for item in patterns:
         for match in re.finditer(item["pattern"], content, flags=re.MULTILINE):
             yield item, match
+
+
 def iter_candidate_files(target: Path):
     count = 0
     for file in target.rglob("*"):
-        if count >= MAX_FILES_TO_SCAN: break
-        if not is_text_candidate(file): continue
+        if count >= MAX_FILES_TO_SCAN:
+            break
+        if not is_text_candidate(file):
+            continue
         try:
-            if file.stat().st_size > MAX_TEXT_FILE_SIZE: continue
-        except Exception: continue
+            if file.stat().st_size > MAX_TEXT_FILE_SIZE:
+                continue
+        except Exception:
+            continue
         count += 1
         yield file
 
+
 def run_semgrep(target):
-    if not tool_exists("semgrep"): return {"findings": [], "debug": {"reason": "semgrep not installed"}}
-    findings, seen, debug_runs = [], set(), []
+    if not tool_exists("semgrep"):
+        return {"findings": [], "debug": {"reason": "semgrep not installed"}}
+
+    findings = []
+    seen = set()
+    debug_runs = []
+
     commands = []
-    if DEFAULT_RULES.exists(): commands.append(["semgrep","scan","--config",str(DEFAULT_RULES),"--json",str(target)])
-    commands.append(["semgrep","scan","--config","p/security-audit","--json",str(target)])
-    commands.append(["semgrep","scan","--config","p/secrets","--json",str(target)])
+
+    if DEFAULT_RULES.exists():
+        commands.append([
+            "semgrep",
+            "scan",
+            "--config",
+            str(DEFAULT_RULES),
+            "--json",
+            str(target),
+        ])
+
+    commands.append([
+        "semgrep",
+        "scan",
+        "--config",
+        "p/security-audit",
+        "--json",
+        str(target),
+    ])
+
+    commands.append([
+        "semgrep",
+        "scan",
+        "--config",
+        "p/secrets",
+        "--json",
+        str(target),
+    ])
+
     for cmd in commands:
         raw = run_cmd(cmd, timeout=420)
-        debug_runs.append({"command":cmd,"returncode":raw.get("returncode"),"stderr":raw.get("stderr","")[:1000],"stdout_size":len(raw.get("stdout",""))})
+        debug_runs.append({
+            "command": cmd,
+            "returncode": raw.get("returncode"),
+            "stderr": raw.get("stderr", "")[:1500],
+            "stdout_size": len(raw.get("stdout", "")),
+        })
+
         if raw.get("stdout"):
             try:
                 data = json.loads(raw["stdout"])
                 for item in data.get("results", []):
                     extra = item.get("extra", {})
-                    add_finding(findings, seen, tool="semgrep", rule_id=item.get("check_id","semgrep.unknown"), severity=normalize_severity(extra.get("severity")), category="sast", title=extra.get("message","Semgrep finding"), message=extra.get("message","Semgrep finding"), file=item.get("path"), line=item.get("start",{}).get("line"))
+                    add_finding(
+                        findings,
+                        seen,
+                        tool="semgrep",
+                        rule_id=item.get("check_id", "semgrep.unknown"),
+                        severity=normalize_severity(extra.get("severity")),
+                        category="sast",
+                        title=extra.get("message", "Semgrep finding"),
+                        message=extra.get("message", "Semgrep finding"),
+                        file=item.get("path"),
+                        line=item.get("start", {}).get("line"),
+                    )
             except Exception as exc:
-                add_finding(findings, seen, tool="semgrep", rule_id="semgrep.parse.error", severity="LOW", category="tooling", title="Could not parse Semgrep output", message=str(exc), file=None, line=None)
+                add_finding(
+                    findings,
+                    seen,
+                    tool="semgrep",
+                    rule_id="semgrep.parse.error",
+                    severity="LOW",
+                    category="tooling",
+                    title="Could not parse Semgrep output",
+                    message=str(exc),
+                    file=None,
+                    line=None,
+                )
+
     return {"findings": findings, "debug": {"runs": debug_runs}}
 
+
 def run_trivy_fs(target):
-    if not tool_exists("trivy"): return {"findings": [], "debug": {"reason": "trivy not installed"}}
-    raw = run_cmd(["trivy","fs","--scanners","vuln","--skip-dirs",",".join(sorted(SKIP_DIRS)),"--quiet","--format","json",str(target)], timeout=420, env={"TRIVY_CACHE_DIR": "/tmp/trivy-cache"})
-    findings, seen = [], set()
-    debug = {"returncode":raw.get("returncode"),"stderr":raw.get("stderr","")[:1000],"stdout_size":len(raw.get("stdout",""))}
+    if not tool_exists("trivy"):
+        return {"findings": [], "debug": {"reason": "trivy not installed"}}
+
+    raw = run_cmd([
+        "trivy",
+        "fs",
+        "--scanners",
+        "vuln",
+        "--skip-dirs",
+        ",".join(sorted(SKIP_DIRS)),
+        "--quiet",
+        "--format",
+        "json",
+        str(target),
+    ], timeout=420, env={"TRIVY_CACHE_DIR": "/tmp/trivy-cache"})
+
+    findings = []
+    seen = set()
+    debug = {
+        "returncode": raw.get("returncode"),
+        "stderr": raw.get("stderr", "")[:1500],
+        "stdout_size": len(raw.get("stdout", "")),
+    }
+
     if raw.get("stdout"):
         try:
             data = json.loads(raw["stdout"])
             for result in data.get("Results", []):
                 target_name = result.get("Target")
                 for vuln in result.get("Vulnerabilities", []) or []:
-                    add_finding(findings, seen, tool="trivy", rule_id=vuln.get("VulnerabilityID"), severity=normalize_severity(vuln.get("Severity")), category="dependency", title=vuln.get("Title") or vuln.get("PkgName") or "Dependency vulnerability", message=vuln.get("Description") or "Dependency vulnerability", file=target_name, line=None)
+                    add_finding(
+                        findings,
+                        seen,
+                        tool="trivy",
+                        rule_id=vuln.get("VulnerabilityID"),
+                        severity=normalize_severity(vuln.get("Severity")),
+                        category="dependency",
+                        title=vuln.get("Title") or vuln.get("PkgName") or "Dependency vulnerability",
+                        message=vuln.get("Description") or "Dependency vulnerability",
+                        file=target_name,
+                        line=None,
+                    )
         except Exception as exc:
-            add_finding(findings, seen, tool="trivy", rule_id="trivy.parse.error", severity="LOW", category="tooling", title="Could not parse Trivy output", message=str(exc), file=None, line=None)
+            add_finding(
+                findings,
+                seen,
+                tool="trivy",
+                rule_id="trivy.parse.error",
+                severity="LOW",
+                category="tooling",
+                title="Could not parse Trivy output",
+                message=str(exc),
+                file=None,
+                line=None,
+            )
+
     return {"findings": findings, "debug": debug}
 
+
 def run_osv(target):
-    if not tool_exists("osv-scanner"): return {"findings": [], "debug": {"reason": "osv-scanner not installed"}}
-    raw = run_cmd(["osv-scanner","scan","--recursive","--format","json",str(target)], timeout=420)
-    findings, seen = [], set()
-    debug = {"returncode":raw.get("returncode"),"stderr":raw.get("stderr","")[:1000],"stdout_size":len(raw.get("stdout",""))}
+    if not tool_exists("osv-scanner"):
+        return {"findings": [], "debug": {"reason": "osv-scanner not installed"}}
+
+    raw = run_cmd([
+        "osv-scanner",
+        "scan",
+        "--recursive",
+        "--format",
+        "json",
+        str(target),
+    ], timeout=420)
+
+    findings = []
+    seen = set()
+    debug = {
+        "returncode": raw.get("returncode"),
+        "stderr": raw.get("stderr", "")[:1500],
+        "stdout_size": len(raw.get("stdout", "")),
+    }
+
     if raw.get("stdout"):
         try:
             data = json.loads(raw["stdout"])
@@ -111,117 +324,657 @@ def run_osv(target):
                 for pkg in result.get("packages", []) or []:
                     package_name = (pkg.get("package") or {}).get("name")
                     for vuln in pkg.get("vulnerabilities", []) or []:
-                        add_finding(findings, seen, tool="osv-scanner", rule_id=vuln.get("id"), severity="HIGH", category="dependency", title=f"OSV finding in {package_name}", message=vuln.get("summary") or vuln.get("details") or "Dependency vulnerability", file=source_path, line=None)
+                        add_finding(
+                            findings,
+                            seen,
+                            tool="osv-scanner",
+                            rule_id=vuln.get("id"),
+                            severity="HIGH",
+                            category="dependency",
+                            title=f"OSV finding in {package_name}",
+                            message=vuln.get("summary") or vuln.get("details") or "Dependency vulnerability",
+                            file=source_path,
+                            line=None,
+                        )
         except Exception as exc:
-            add_finding(findings, seen, tool="osv-scanner", rule_id="osv.parse.error", severity="LOW", category="tooling", title="Could not parse OSV output", message=str(exc), file=None, line=None)
+            add_finding(
+                findings,
+                seen,
+                tool="osv-scanner",
+                rule_id="osv.parse.error",
+                severity="LOW",
+                category="tooling",
+                title="Could not parse OSV output",
+                message=str(exc),
+                file=None,
+                line=None,
+            )
+
     return {"findings": findings, "debug": debug}
+
 
 def run_ai_checks(target):
-    findings, seen = [], set()
+    findings = []
+    seen = set()
     debug = {"files_checked": 0}
+
     checks = [
-        {"rule_id":"ai.eval.usage","severity":"HIGH","category":"ai-security","title":"Dangerous eval() usage","message":"eval() detected.","pattern":r"\beval\s*\("},
-        {"rule_id":"ai.exec.usage","severity":"HIGH","category":"ai-security","title":"Dangerous exec() usage","message":"exec() detected.","pattern":r"\bexec\s*\("},
-        {"rule_id":"ai.shell.true","severity":"HIGH","category":"ai-security","title":"shell=True usage detected","message":"shell=True may enable command injection.","pattern":r"shell\s*=\s*True"},
-        {"rule_id":"ai.tls.verify.false","severity":"MEDIUM","category":"ai-security","title":"TLS verification disabled","message":"verify=False detected.","pattern":r"verify\s*=\s*False"},
-        {"rule_id":"ai.child_process.exec","severity":"HIGH","category":"ai-security","title":"child_process.exec detected","message":"child_process.exec may lead to command injection.","pattern":r"child_process\.exec\s*\("},
+        {
+            "rule_id": "ai.eval.usage",
+            "severity": "HIGH",
+            "category": "ai-security",
+            "title": "Dangerous eval() usage",
+            "message": "eval() detected.",
+            "pattern": r"\beval\s*\(",
+        },
+        {
+            "rule_id": "ai.exec.usage",
+            "severity": "HIGH",
+            "category": "ai-security",
+            "title": "Dangerous exec() usage",
+            "message": "exec() detected.",
+            "pattern": r"\bexec\s*\(",
+        },
+        {
+            "rule_id": "ai.shell.true",
+            "severity": "HIGH",
+            "category": "ai-security",
+            "title": "shell=True usage detected",
+            "message": "shell=True may enable command injection.",
+            "pattern": r"shell\s*=\s*True",
+        },
+        {
+            "rule_id": "ai.tls.verify.false",
+            "severity": "MEDIUM",
+            "category": "ai-security",
+            "title": "TLS verification disabled",
+            "message": "verify=False detected.",
+            "pattern": r"verify\s*=\s*False",
+        },
+        {
+            "rule_id": "ai.child_process.exec",
+            "severity": "HIGH",
+            "category": "ai-security",
+            "title": "child_process.exec detected",
+            "message": "child_process.exec may lead to command injection.",
+            "pattern": r"child_process\.exec\s*\(",
+        },
     ]
+
     for file in iter_candidate_files(target):
         content = safe_read_text(file)
-        if content is None: continue
+        if content is None:
+            continue
+
         debug["files_checked"] += 1
         lower = content.lower()
+
         if "openai" in lower and "api_key" in lower:
-            add_finding(findings, seen, tool="ai-check", rule_id="ai.exposed.openai.api_key", severity="HIGH", category="ai-security", title="Possible OpenAI API key exposure", message="API key usage detected near OpenAI integration.", file=file, line=find_line_number(content, "api_key"))
+            add_finding(
+                findings,
+                seen,
+                tool="ai-check",
+                rule_id="ai.exposed.openai.api_key",
+                severity="HIGH",
+                category="ai-security",
+                title="Possible OpenAI API key exposure",
+                message="API key usage detected near OpenAI integration.",
+                file=file,
+                line=find_line_number(content, "api_key"),
+            )
+
+        if "anthropic" in lower and "api_key" in lower:
+            add_finding(
+                findings,
+                seen,
+                tool="ai-check",
+                rule_id="ai.exposed.anthropic.api_key",
+                severity="HIGH",
+                category="ai-security",
+                title="Possible Anthropic API key exposure",
+                message="API key usage detected near Anthropic integration.",
+                file=file,
+                line=find_line_number(content, "api_key"),
+            )
+
         for check, match in regex_findings(content, checks):
             line = content[:match.start()].count("\n") + 1
-            add_finding(findings, seen, tool="ai-check", rule_id=check["rule_id"], severity=check["severity"], category=check["category"], title=check["title"], message=check["message"], file=file, line=line)
+            add_finding(
+                findings,
+                seen,
+                tool="ai-check",
+                rule_id=check["rule_id"],
+                severity=check["severity"],
+                category=check["category"],
+                title=check["title"],
+                message=check["message"],
+                file=file,
+                line=line,
+            )
+
     return {"findings": findings, "debug": debug}
 
+
 def run_secret_scan(target):
-    findings, seen = [], set()
+    findings = []
+    seen = set()
     debug = {"files_checked": 0}
-    patterns = [("AWS Access Key", r"AKIA[0-9A-Z]{16}"),("Generic Secret Assignment", r"(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*['\"][^'\"\n]{10,}['\"]")]
+
+    patterns = [
+        ("AWS Access Key", r"AKIA[0-9A-Z]{16}"),
+        ("GitHub Token", r"github_pat_[A-Za-z0-9_]{20,}"),
+        ("OpenAI-style Key", r"sk-[A-Za-z0-9]{20,}"),
+        ("Private Key Block", r"-----BEGIN (RSA|DSA|EC|OPENSSH|PGP) PRIVATE KEY-----"),
+        ("Generic Secret Assignment", r"(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*[\"'][^\"'\n]{10,}[\"']"),
+    ]
+
     for file in iter_candidate_files(target):
         content = safe_read_text(file)
-        if content is None: continue
+        if content is None:
+            continue
+
         debug["files_checked"] += 1
+
         for name, pattern in patterns:
             for match in re.finditer(pattern, content, flags=re.MULTILINE):
                 line = content[:match.start()].count("\n") + 1
-                add_finding(findings, seen, tool="secret-scan", rule_id="secret.detected", severity="HIGH", category="secrets", title=f"{name} detected", message="Possible secret found in repository files.", file=file, line=line)
+                add_finding(
+                    findings,
+                    seen,
+                    tool="secret-scan",
+                    rule_id="secret.detected",
+                    severity="HIGH",
+                    category="secrets",
+                    title=f"{name} detected",
+                    message="Possible secret found in repository files.",
+                    file=file,
+                    line=line,
+                )
+
     return {"findings": findings, "debug": debug}
+
 
 def run_docker_checks(target):
-    findings, seen = [], set()
+    findings = []
+    seen = set()
     debug = {"dockerfiles_checked": 0}
+
     for dockerfile in Path(target).rglob("Dockerfile"):
-        if should_skip_file(dockerfile): continue
+        if should_skip_file(dockerfile):
+            continue
+
         content = safe_read_text(dockerfile)
-        if content is None: continue
+        if content is None:
+            continue
+
         debug["dockerfiles_checked"] += 1
         lower = content.lower()
+
         if ":latest" in lower:
-            add_finding(findings, seen, tool="docker-check", rule_id="docker.latest.tag", severity="MEDIUM", category="misconfig", title="Using latest tag", message="Avoid using latest tag in Dockerfile base images.", file=dockerfile, line=find_line_number(lower, ":latest"))
+            add_finding(
+                findings,
+                seen,
+                tool="docker-check",
+                rule_id="docker.latest.tag",
+                severity="MEDIUM",
+                category="misconfig",
+                title="Using latest tag",
+                message="Avoid using latest tag in Dockerfile base images.",
+                file=dockerfile,
+                line=find_line_number(lower, ":latest"),
+            )
+
+        if "\nuser root" in lower or lower.startswith("user root"):
+            add_finding(
+                findings,
+                seen,
+                tool="docker-check",
+                rule_id="docker.root.user",
+                severity="MEDIUM",
+                category="misconfig",
+                title="Container runs as root",
+                message="Running containers as root increases risk.",
+                file=dockerfile,
+                line=find_line_number(lower, "user root"),
+            )
+
+        if "curl http://" in lower or "wget http://" in lower or "add http://" in lower:
+            add_finding(
+                findings,
+                seen,
+                tool="docker-check",
+                rule_id="docker.insecure.download",
+                severity="MEDIUM",
+                category="misconfig",
+                title="Insecure HTTP download in Dockerfile",
+                message="HTTP downloads in build steps may be insecure.",
+                file=dockerfile,
+                line=None,
+            )
+
         if "healthcheck" not in lower:
-            add_finding(findings, seen, tool="docker-check", rule_id="docker.no.healthcheck", severity="LOW", category="misconfig", title="No HEALTHCHECK found", message="Consider adding a HEALTHCHECK instruction.", file=dockerfile, line=None)
+            add_finding(
+                findings,
+                seen,
+                tool="docker-check",
+                rule_id="docker.no.healthcheck",
+                severity="LOW",
+                category="misconfig",
+                title="No HEALTHCHECK found",
+                message="Consider adding a HEALTHCHECK instruction.",
+                file=dockerfile,
+                line=None,
+            )
+
     return {"findings": findings, "debug": debug}
+
 
 def run_frontend_checks(target):
-    findings, seen = [], set()
+    findings = []
+    seen = set()
     debug = {"files_checked": 0}
+
     patterns = [
-        {"rule_id":"frontend.dangerouslysetinnerhtml","severity":"HIGH","category":"frontend","title":"dangerouslySetInnerHTML detected","message":"dangerouslySetInnerHTML may introduce XSS risk.","pattern":r"dangerouslySetInnerHTML"},
-        {"rule_id":"frontend.innerhtml.assignment","severity":"HIGH","category":"frontend","title":"innerHTML assignment detected","message":"Direct innerHTML assignment may introduce XSS risk.","pattern":r"\.innerHTML\s*="},
+        {
+            "rule_id": "frontend.dangerouslysetinnerhtml",
+            "severity": "HIGH",
+            "category": "frontend",
+            "title": "dangerouslySetInnerHTML detected",
+            "message": "dangerouslySetInnerHTML may introduce XSS risk.",
+            "pattern": r"dangerouslySetInnerHTML",
+        },
+        {
+            "rule_id": "frontend.innerhtml.assignment",
+            "severity": "HIGH",
+            "category": "frontend",
+            "title": "innerHTML assignment detected",
+            "message": "Direct innerHTML assignment may introduce XSS risk.",
+            "pattern": r"\.innerHTML\s*=",
+        },
+        {
+            "rule_id": "frontend.localstorage.token",
+            "severity": "MEDIUM",
+            "category": "frontend",
+            "title": "Token stored in localStorage",
+            "message": "Sensitive tokens in localStorage may be exposed to XSS.",
+            "pattern": r"localStorage\.(setItem|getItem)\s*\(\s*[\"'][^\"']*token[^\"']*[\"']",
+        },
+        {
+            "rule_id": "frontend.document.cookie",
+            "severity": "MEDIUM",
+            "category": "frontend",
+            "title": "document.cookie usage detected",
+            "message": "Direct cookie handling may be risky.",
+            "pattern": r"document\.cookie",
+        },
+        {
+            "rule_id": "frontend.cors.wildcard",
+            "severity": "MEDIUM",
+            "category": "frontend",
+            "title": "Wildcard CORS origin detected",
+            "message": "origin: '*' may be too permissive.",
+            "pattern": r"origin\s*:\s*[\"']\*[\"']",
+        },
     ]
+
     for file in Path(target).rglob("*"):
-        if not file.is_file() or should_skip_file(file): continue
-        if file.suffix.lower() not in {".js",".jsx",".ts",".tsx",".html"}: continue
+        if not file.is_file() or should_skip_file(file):
+            continue
+        if file.suffix.lower() not in {".js", ".jsx", ".ts", ".tsx", ".html"}:
+            continue
         try:
-            if file.stat().st_size > MAX_TEXT_FILE_SIZE: continue
-        except Exception: continue
+            if file.stat().st_size > MAX_TEXT_FILE_SIZE:
+                continue
+        except Exception:
+            continue
+
         content = safe_read_text(file)
-        if content is None: continue
+        if content is None:
+            continue
+
         debug["files_checked"] += 1
+
         for check, match in regex_findings(content, patterns):
             line = content[:match.start()].count("\n") + 1
-            add_finding(findings, seen, tool="frontend-check", rule_id=check["rule_id"], severity=check["severity"], category=check["category"], title=check["title"], message=check["message"], file=file, line=line)
+            add_finding(
+                findings,
+                seen,
+                tool="frontend-check",
+                rule_id=check["rule_id"],
+                severity=check["severity"],
+                category=check["category"],
+                title=check["title"],
+                message=check["message"],
+                file=file,
+                line=line,
+            )
+
     return {"findings": findings, "debug": debug}
+
 
 def run_ci_checks(target):
-    findings, seen = [], set()
+    findings = []
+    seen = set()
     debug = {"workflow_files_checked": 0}
+
     workflows_dir = Path(target) / ".github" / "workflows"
-    if not workflows_dir.exists(): return {"findings": findings, "debug": debug}
+    if not workflows_dir.exists():
+        return {"findings": findings, "debug": debug}
+
     for file in workflows_dir.rglob("*"):
-        if not file.is_file() or file.suffix.lower() not in {".yml",".yaml"}: continue
+        if not file.is_file() or file.suffix.lower() not in {".yml", ".yaml"}:
+            continue
+
         content = safe_read_text(file)
-        if content is None: continue
+        if content is None:
+            continue
+
         debug["workflow_files_checked"] += 1
         lower = content.lower()
+
         if "pull_request_target" in lower:
-            add_finding(findings, seen, tool="ci-check", rule_id="ci.pull_request_target", severity="HIGH", category="ci-cd", title="pull_request_target used", message="pull_request_target can be risky if workflows process untrusted code.", file=file, line=find_line_number(lower, "pull_request_target"))
+            add_finding(
+                findings,
+                seen,
+                tool="ci-check",
+                rule_id="ci.pull_request_target",
+                severity="HIGH",
+                category="ci-cd",
+                title="pull_request_target used",
+                message="pull_request_target can be risky if workflows process untrusted code.",
+                file=file,
+                line=find_line_number(lower, "pull_request_target"),
+            )
+
+        for match in re.finditer(r"uses:\s*[^@\s]+@main", content):
+            line = content[:match.start()].count("\n") + 1
+            add_finding(
+                findings,
+                seen,
+                tool="ci-check",
+                rule_id="ci.unpinned.main",
+                severity="MEDIUM",
+                category="ci-cd",
+                title="GitHub Action pinned to main",
+                message="Pin GitHub Actions to immutable versions or SHAs.",
+                file=file,
+                line=line,
+            )
+
+        for match in re.finditer(r"uses:\s*[^@\s]+@master", content):
+            line = content[:match.start()].count("\n") + 1
+            add_finding(
+                findings,
+                seen,
+                tool="ci-check",
+                rule_id="ci.unpinned.master",
+                severity="MEDIUM",
+                category="ci-cd",
+                title="GitHub Action pinned to master",
+                message="Pin GitHub Actions to immutable versions or SHAs.",
+                file=file,
+                line=line,
+            )
+
     return {"findings": findings, "debug": debug}
 
+
+def run_backend_checks(target):
+    findings = []
+    seen = set()
+    debug = {"files_checked": 0}
+
+    checks = [
+        {
+            "rule_id": "backend.sql_injection.fstring",
+            "severity": "HIGH",
+            "category": "backend",
+            "title": "Possible SQL injection via f-string",
+            "message": "Potential SQL query built with f-string detected.",
+            "pattern": r'(SELECT|INSERT|UPDATE|DELETE).*{.+}',
+        },
+        {
+            "rule_id": "backend.sql_injection.format",
+            "severity": "HIGH",
+            "category": "backend",
+            "title": "Possible SQL injection via string formatting",
+            "message": "Potential SQL query built with string formatting detected.",
+            "pattern": r'["\']\s*(SELECT|INSERT|UPDATE|DELETE).*(%s|\.format\()',
+        },
+        {
+            "rule_id": "backend.command_injection.os_system",
+            "severity": "HIGH",
+            "category": "backend",
+            "title": "os.system detected",
+            "message": "os.system may allow command injection if input is not validated.",
+            "pattern": r'os\.system\s*\(',
+        },
+        {
+            "rule_id": "backend.command_injection.subprocess",
+            "severity": "HIGH",
+            "category": "backend",
+            "title": "subprocess call with shell=True detected",
+            "message": "subprocess with shell=True may allow command injection.",
+            "pattern": r'subprocess\.(run|Popen|call|check_output)\s*\([^\)]*shell\s*=\s*True',
+        },
+        {
+            "rule_id": "backend.path_traversal.open_input",
+            "severity": "MEDIUM",
+            "category": "backend",
+            "title": "Possible path traversal sink",
+            "message": "open() on dynamic input may be risky if path is user-controlled.",
+            "pattern": r'open\s*\([^\)]*(request|input|user_input|filename|filepath|path)',
+        },
+        {
+            "rule_id": "backend.jwt_verify_false",
+            "severity": "HIGH",
+            "category": "backend",
+            "title": "JWT verification disabled",
+            "message": "JWT decode with verify=False is unsafe.",
+            "pattern": r'jwt\.decode\s*\([^\)]*verify\s*=\s*False',
+        },
+        {
+            "rule_id": "backend.debug_true",
+            "severity": "MEDIUM",
+            "category": "backend",
+            "title": "Debug mode enabled",
+            "message": "Debug mode should not be enabled in production.",
+            "pattern": r'debug\s*=\s*True',
+        },
+        {
+            "rule_id": "backend.cors_wildcard_credentials",
+            "severity": "HIGH",
+            "category": "backend",
+            "title": "CORS wildcard with credentials risk",
+            "message": "Wildcard origin together with credentials is risky.",
+            "pattern": r'origin\s*:\s*[\"\\\']\*[\"\\\'].*credentials\s*:\s*true',
+        },
+        {
+            "rule_id": "backend.prompt_injection_risk",
+            "severity": "MEDIUM",
+            "category": "ai-security",
+            "title": "Possible prompt injection risk",
+            "message": "Untrusted input appears to be inserted into prompt-building logic.",
+            "pattern": r'(prompt|messages|system_prompt).*(request|user_input|input\()',
+        },
+        {
+            "rule_id": "backend.llm_output_eval",
+            "severity": "CRITICAL",
+            "category": "ai-security",
+            "title": "LLM output may be executed",
+            "message": "Possible execution of model output detected.",
+            "pattern": r'(eval|exec|subprocess\.run|os\.system)\s*\([^\)]*(llm|model|response|output)',
+        },
+        {
+            "rule_id": "backend.open_redirect",
+            "severity": "MEDIUM",
+            "category": "backend",
+            "title": "Possible open redirect",
+            "message": "Redirect may use untrusted input directly.",
+            "pattern": r'(redirect|RedirectResponse)\s*\([^\)]*(request|next|url|target)',
+        },
+    ]
+
+    for file in iter_candidate_files(target):
+        if file.suffix.lower() not in {".py", ".js", ".ts", ".tsx", ".jsx"}:
+            continue
+
+        content = safe_read_text(file)
+        if content is None:
+            continue
+
+        debug["files_checked"] += 1
+
+        for check, match in regex_findings(content, checks):
+            line = content[:match.start()].count("\n") + 1
+            add_finding(
+                findings,
+                seen,
+                tool="backend-check",
+                rule_id=check["rule_id"],
+                severity=check["severity"],
+                category=check["category"],
+                title=check["title"],
+                message=check["message"],
+                file=file,
+                line=line,
+            )
+
+    return {"findings": findings, "debug": debug}
+
+
+def run_agent_checks(target):
+    findings = []
+    seen = set()
+    debug = {"files_checked": 0}
+
+    checks = [
+        {
+            "rule_id": "agent.tool_call.unvalidated",
+            "severity": "HIGH",
+            "category": "ai-security",
+            "title": "Possible unvalidated tool call",
+            "message": "Agent or tool execution may use untrusted input without allowlist validation.",
+            "pattern": r'(agent|tool|tools)\.(run|execute|invoke)\s*\([^\)]*(user_input|request|message)',
+        },
+        {
+            "rule_id": "agent.prompt.concat",
+            "severity": "MEDIUM",
+            "category": "ai-security",
+            "title": "Prompt built from raw user input",
+            "message": "Prompt appears to concatenate raw user input directly.",
+            "pattern": r'(prompt|system_prompt|messages)\s*=.*(\+|f[\"\\\']).*(user_input|request|message)',
+        },
+        {
+            "rule_id": "agent.system_prompt.exposed",
+            "severity": "LOW",
+            "category": "ai-security",
+            "title": "System prompt appears hardcoded in code",
+            "message": "Hardcoded system prompt found. Review for accidental leakage.",
+            "pattern": r'You are (an|a) .*assistant',
+        },
+    ]
+
+    for file in iter_candidate_files(target):
+        if file.suffix.lower() not in {".py", ".js", ".ts", ".tsx", ".jsx"}:
+            continue
+
+        content = safe_read_text(file)
+        if content is None:
+            continue
+
+        debug["files_checked"] += 1
+
+        for check, match in regex_findings(content, checks):
+            line = content[:match.start()].count("\n") + 1
+            add_finding(
+                findings,
+                seen,
+                tool="agent-check",
+                rule_id=check["rule_id"],
+                severity=check["severity"],
+                category=check["category"],
+                title=check["title"],
+                message=check["message"],
+                file=file,
+                line=line,
+            )
+
+    return {"findings": findings, "debug": debug}
+
+
 def calculate_score(findings):
-    weights = {"CRITICAL": 40, "HIGH": 20, "MEDIUM": 8, "LOW": 3, "UNKNOWN": 1}
+    weights = {
+        "CRITICAL": 40,
+        "HIGH": 20,
+        "MEDIUM": 8,
+        "LOW": 3,
+        "UNKNOWN": 1,
+    }
     return sum(weights.get(item.get("severity", "UNKNOWN"), 1) for item in findings)
 
+
 def create_sarif(findings, target_name):
-    rules, results, seen_rules = [], [], set()
+    rules = []
+    results = []
+    seen_rules = set()
+
     for item in findings:
         rule_id = item.get("rule_id") or "unknown.rule"
+
         if rule_id not in seen_rules:
             seen_rules.add(rule_id)
-            rules.append({"id": rule_id, "name": item.get("title") or rule_id, "shortDescription": {"text": item.get("title") or rule_id}, "fullDescription": {"text": item.get("message") or item.get("title") or rule_id}})
-        level = {"CRITICAL":"error","HIGH":"error","MEDIUM":"warning","LOW":"note","UNKNOWN":"note"}.get(item.get("severity","UNKNOWN"), "note")
-        location = {"physicalLocation": {"artifactLocation": {"uri": item.get("file") or "unknown"}}}
-        if item.get("line"): location["physicalLocation"]["region"] = {"startLine": int(item["line"])}
-        results.append({"ruleId": rule_id, "level": level, "message": {"text": item.get("message") or item.get("title") or rule_id}, "locations": [location]})
-    return {"version":"2.1.0","runs":[{"tool":{"driver":{"name":"ai-sec-audit","rules":rules}},"automationDetails":{"id":target_name},"results":results}]}
+            rules.append({
+                "id": rule_id,
+                "name": item.get("title") or rule_id,
+                "shortDescription": {"text": item.get("title") or rule_id},
+                "fullDescription": {"text": item.get("message") or item.get("title") or rule_id},
+            })
+
+        level = {
+            "CRITICAL": "error",
+            "HIGH": "error",
+            "MEDIUM": "warning",
+            "LOW": "note",
+            "UNKNOWN": "note",
+        }.get(item.get("severity", "UNKNOWN"), "note")
+
+        location = {
+            "physicalLocation": {
+                "artifactLocation": {"uri": item.get("file") or "unknown"}
+            }
+        }
+
+        if item.get("line"):
+            location["physicalLocation"]["region"] = {"startLine": int(item["line"])}
+
+        results.append({
+            "ruleId": rule_id,
+            "level": level,
+            "message": {"text": item.get("message") or item.get("title") or rule_id},
+            "locations": [location],
+        })
+
+    return {
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": "ai-sec-audit",
+                        "rules": rules,
+                    }
+                },
+                "automationDetails": {"id": target_name},
+                "results": results,
+            }
+        ],
+    }
+
 
 def build_html(report):
     rows = []
+
     for finding in report["findings"]:
         sev = escape(finding.get("severity", "UNKNOWN"))
         cat = escape(finding.get("category", "unknown"))
@@ -229,19 +982,130 @@ def build_html(report):
         line = finding.get("line") or ""
         title = escape(finding.get("title", "Finding"))
         tool = escape(finding.get("tool", "unknown"))
-        rows.append(f"<tr><td>{sev}</td><td>{cat}</td><td>{file_name}</td><td>{line}</td><td>{title}</td><td>{tool}</td></tr>")
-    if not rows: rows = ['<tr><td colspan="6">No findings</td></tr>']
-    return f"""<!doctype html><html><head><meta charset='utf-8'/><title>AI Security Report</title><style>body{{font-family:Arial,sans-serif;margin:24px;background:#f7f7fb;color:#111827}}.grid{{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr));gap:12px;margin-bottom:18px}}.card{{background:#fff;border-radius:16px;padding:16px;box-shadow:0 2px 12px rgba(0,0,0,.08)}}.small{{color:#6b7280;font-size:12px;text-transform:uppercase;margin-bottom:8px}}.big{{font-size:28px;font-weight:700}}table{{width:100%;border-collapse:collapse;background:#fff;border-radius:16px;overflow:hidden}}th,td{{padding:10px;border-bottom:1px solid #ececf3;text-align:left;vertical-align:top}}th{{background:#111827;color:#fff}}.meta{{background:#fff;border-radius:16px;padding:16px;margin-bottom:18px;box-shadow:0 2px 12px rgba(0,0,0,.08)}}</style></head><body><h1>AI Security Report</h1><p><strong>Target:</strong> {escape(report["target"])}</p><p><strong>Scanned path:</strong> {escape(report["scanned_path"])}</p><div class='grid'><div class='card'><div class='small'>Score</div><div class='big'>{report["score"]}</div></div><div class='card'><div class='small'>Total</div><div class='big'>{report["findings_count"]}</div></div><div class='card'><div class='small'>Critical</div><div class='big'>{report["severity_totals"]["CRITICAL"]}</div></div><div class='card'><div class='small'>High</div><div class='big'>{report["severity_totals"]["HIGH"]}</div></div><div class='card'><div class='small'>Medium</div><div class='big'>{report["severity_totals"]["MEDIUM"]}</div></div></div><div class="meta"><h2>Tool diagnostics</h2><pre>{escape(json.dumps(report["tools"], ensure_ascii=False, indent=2))}</pre></div><table><tr><th>Severity</th><th>Category</th><th>File</th><th>Line</th><th>Title</th><th>Tool</th></tr>{''.join(rows)}</table></body></html>"""
+
+        rows.append(
+            f"<tr><td>{sev}</td><td>{cat}</td><td>{file_name}</td><td>{line}</td><td>{title}</td><td>{tool}</td></tr>"
+        )
+
+    if not rows:
+        rows = ['<tr><td colspan="6">No findings</td></tr>']
+
+    return f"""<!doctype html>
+<html>
+<head>
+<meta charset='utf-8'/>
+<title>AI Security Report</title>
+<style>
+body {{
+    font-family: Arial, sans-serif;
+    margin: 24px;
+    background: #f7f7fb;
+    color: #111827;
+}}
+.grid {{
+    display: grid;
+    grid-template-columns: repeat(5, minmax(120px, 1fr));
+    gap: 12px;
+    margin-bottom: 18px;
+}}
+.card {{
+    background: #fff;
+    border-radius: 16px;
+    padding: 16px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.08);
+}}
+.small {{
+    color: #6b7280;
+    font-size: 12px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+}}
+.big {{
+    font-size: 28px;
+    font-weight: 700;
+}}
+table {{
+    width: 100%;
+    border-collapse: collapse;
+    background: #fff;
+    border-radius: 16px;
+    overflow: hidden;
+}}
+th, td {{
+    padding: 10px;
+    border-bottom: 1px solid #ececf3;
+    text-align: left;
+    vertical-align: top;
+}}
+th {{
+    background: #111827;
+    color: #fff;
+}}
+.meta {{
+    background: #fff;
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 18px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.08);
+}}
+</style>
+</head>
+<body>
+<h1>AI Security Report</h1>
+<p><strong>Target:</strong> {escape(report["target"])}</p>
+<p><strong>Scanned path:</strong> {escape(report["scanned_path"])}</p>
+
+<div class='grid'>
+    <div class='card'><div class='small'>Score</div><div class='big'>{report["score"]}</div></div>
+    <div class='card'><div class='small'>Total</div><div class='big'>{report["findings_count"]}</div></div>
+    <div class='card'><div class='small'>Critical</div><div class='big'>{report["severity_totals"]["CRITICAL"]}</div></div>
+    <div class='card'><div class='small'>High</div><div class='big'>{report["severity_totals"]["HIGH"]}</div></div>
+    <div class='card'><div class='small'>Medium</div><div class='big'>{report["severity_totals"]["MEDIUM"]}</div></div>
+</div>
+
+<div class="meta">
+    <h2>Tool diagnostics</h2>
+    <pre>{escape(json.dumps(report["tools"], ensure_ascii=False, indent=2))}</pre>
+</div>
+
+<table>
+    <tr>
+        <th>Severity</th>
+        <th>Category</th>
+        <th>File</th>
+        <th>Line</th>
+        <th>Title</th>
+        <th>Tool</th>
+    </tr>
+    {''.join(rows)}
+</table>
+</body>
+</html>"""
+
 
 def main():
     if len(sys.argv) < 4:
         print("Usage: python scanner.py /path/to/project <target-name> <output-dir>")
         sys.exit(1)
+
     target = Path(sys.argv[1]).resolve()
     target_name = sys.argv[2]
     output_dir = Path(sys.argv[3]).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    jobs = {"semgrep": run_semgrep, "trivy": run_trivy_fs, "osv-scanner": run_osv, "ai-check": run_ai_checks, "secret-scan": run_secret_scan, "docker-check": run_docker_checks, "frontend-check": run_frontend_checks, "ci-check": run_ci_checks}
+
+    jobs = {
+        "semgrep": run_semgrep,
+        "trivy": run_trivy_fs,
+        "osv-scanner": run_osv,
+        "ai-check": run_ai_checks,
+        "secret-scan": run_secret_scan,
+        "docker-check": run_docker_checks,
+        "frontend-check": run_frontend_checks,
+        "ci-check": run_ci_checks,
+        "backend-check": run_backend_checks,
+        "agent-check": run_agent_checks,
+    }
+
     results = {}
     with ThreadPoolExecutor(max_workers=4) as executor:
         future_map = {executor.submit(func, target): name for name, func in jobs.items()}
@@ -250,19 +1114,72 @@ def main():
             try:
                 results[name] = future.result()
             except Exception as exc:
-                results[name] = {"findings":[{"tool":name,"rule_id":f"{name}.execution.error","severity":"LOW","category":"tooling","title":f"{name} execution error","message":str(exc),"file":None,"line":None}],"debug":{"reason":str(exc)}}
+                results[name] = {
+                    "findings": [{
+                        "tool": name,
+                        "rule_id": f"{name}.execution.error",
+                        "severity": "LOW",
+                        "category": "tooling",
+                        "title": f"{name} execution error",
+                        "message": str(exc),
+                        "file": None,
+                        "line": None,
+                    }],
+                    "debug": {"reason": str(exc)},
+                }
+
     findings = []
-    for name in jobs: findings.extend(results.get(name, {}).get("findings", []))
-    severity_totals = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNKNOWN": 0}
+    for name in jobs:
+        findings.extend(results.get(name, {}).get("findings", []))
+
+    severity_totals = {
+        "CRITICAL": 0,
+        "HIGH": 0,
+        "MEDIUM": 0,
+        "LOW": 0,
+        "UNKNOWN": 0,
+    }
+
     for item in findings:
         sev = item.get("severity", "UNKNOWN")
         severity_totals[sev] = severity_totals.get(sev, 0) + 1
-    report = {"target": target_name, "scanned_path": str(target), "score": calculate_score(findings), "findings_count": len(findings), "severity_totals": severity_totals, "findings": findings, "tools": {name: {"available": tool_exists(name) if name in {"semgrep","trivy","osv-scanner"} else True, "findings_count": len(results.get(name, {}).get("findings", [])), "debug": results.get(name, {}).get("debug", {})} for name in jobs}}
-    (output_dir / "security-report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    (output_dir / "security-report.html").write_text(build_html(report), encoding="utf-8")
-    (output_dir / "security-report.sarif").write_text(json.dumps(create_sarif(findings, target_name), ensure_ascii=False, indent=2), encoding="utf-8")
-    critical_or_high = [x for x in findings if x.get("severity") in ("CRITICAL", "HIGH")]
+
+    report = {
+        "target": target_name,
+        "scanned_path": str(target),
+        "score": calculate_score(findings),
+        "findings_count": len(findings),
+        "severity_totals": severity_totals,
+        "findings": findings,
+        "tools": {
+            name: {
+                "available": tool_exists(name) if name in {"semgrep", "trivy", "osv-scanner"} else True,
+                "findings_count": len(results.get(name, {}).get("findings", [])),
+                "debug": results.get(name, {}).get("debug", {}),
+            }
+            for name in jobs
+        },
+    }
+
+    (output_dir / "security-report.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (output_dir / "security-report.html").write_text(
+        build_html(report),
+        encoding="utf-8",
+    )
+    (output_dir / "security-report.sarif").write_text(
+        json.dumps(create_sarif(findings, target_name), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    critical_or_high = [
+        x for x in findings
+        if x.get("severity") in ("CRITICAL", "HIGH")
+    ]
     sys.exit(2 if critical_or_high else 0)
+
 
 if __name__ == "__main__":
     main()
